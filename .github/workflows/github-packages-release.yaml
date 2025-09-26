@@ -53,24 +53,15 @@ jobs:
       - name: Update version in Maven configuration
         if: ${{ steps.release-version.outputs.value != '' }}
         run: |
-          mvn --no-transfer-progress \\
-            --batch-mode \\
+          mvn --no-transfer-progress \
+            --batch-mode \
             versions:set -DnewVersion=${{ steps.release-version.outputs.value }}
-
-      - name: Install GPG key
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.OSSH_GPG_SECRET_KEY }}
-        run: |
-          cat <(echo -e "$GPG_PRIVATE_KEY") | gpg --batch --import
-          gpg --list-secret-keys --keyid-format LONG
 
       - name: Publish to GitHub Packages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_PASSPHRASE: ${{ secrets.OSSH_GPG_SECRET_KEY_PASSWORD }}
         run: |
           mvn --no-transfer-progress \
             --batch-mode \
-            -Dgpg.passphrase="$GPG_PASSPHRASE" \
             -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/adRise/lettuce \
             deploy -P sonatype-oss-release
