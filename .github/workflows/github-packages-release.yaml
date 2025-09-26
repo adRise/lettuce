@@ -69,8 +69,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_PASSPHRASE: ${{ secrets.OSSH_GPG_SECRET_KEY_PASSWORD }}
         run: |
-          mvn --no-transfer-progress \\
-            --batch-mode \\
-            -Dgpg.passphrase="$GPG_PASSPHRASE" \\
-            -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/adRise/lettuce \\
+          mvn --no-transfer-progress \
+            --batch-mode \
+            -Dgpg.passphrase="$GPG_PASSPHRASE" \
+            -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/adRise/lettuce \
             deploy -P sonatype-oss-release
