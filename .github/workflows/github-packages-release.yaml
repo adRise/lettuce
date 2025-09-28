@@ -64,5 +64,6 @@ jobs:
           mvn --no-transfer-progress \
             --batch-mode \
             -Dgpg.skip=true \
+            -Dcentral.autoPublish=false \
             -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/adRise/lettuce \
             deploy -P sonatype-oss-release
