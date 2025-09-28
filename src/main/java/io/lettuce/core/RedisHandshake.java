@@ -21,11 +21,13 @@ package io.lettuce.core;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -52,6 +54,8 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 class RedisHandshake implements ConnectionInitializer {
 
     private static final InternalLogger LOG = InternalLoggerFactory.getInstance(RedisHandshake.class);
+
+    private static final RedisCredentials NO_CREDENTIALS = RedisCredentials.just(null, (char[]) null);
 
     private final RedisCommandBuilder<String, String> commandBuilder = new RedisCommandBuilder<>(StringCodec.UTF8);
 
@@ -195,13 +199,14 @@ class RedisHandshake implements ConnectionInitializer {
     private CompletableFuture<?> initiateHandshakeResp2(Channel channel, RedisCredentialsProvider credentialsProvider) {
 
         if (credentialsProvider instanceof RedisCredentialsProvider.ImmediateRedisCredentialsProvider) {
-            return dispatchAuthOrPing(channel,
-                    ((RedisCredentialsProvider.ImmediateRedisCredentialsProvider) credentialsProvider).resolveCredentialsNow());
+            RedisCredentials credentials = ((RedisCredentialsProvider.ImmediateRedisCredentialsProvider) credentialsProvider)
+                    .resolveCredentialsNow();
+            return authenticateResp2(channel, credentials, true, credentials);
         }
 
         CompletableFuture<RedisCredentials> credentialsFuture = credentialsProvider.resolveCredentials().toFuture();
 
-        return credentialsFuture.thenComposeAsync(credentials -> dispatchAuthOrPing(channel, credentials));
+        return credentialsFuture.thenComposeAsync(credentials -> authenticateResp2(channel, credentials, true, credentials));
     }
 
     private CompletableFuture<String> dispatchAuthOrPing(Channel channel, RedisCredentials credentials) {
@@ -228,13 +233,14 @@ class RedisHandshake implements ConnectionInitializer {
             RedisCredentialsProvider credentialsProvider) {
 
         if (credentialsProvider instanceof RedisCredentialsProvider.ImmediateRedisCredentialsProvider) {
-            return dispatchHello(channel,
-                    ((RedisCredentialsProvider.ImmediateRedisCredentialsProvider) credentialsProvider).resolveCredentialsNow());
+            RedisCredentials credentials = ((RedisCredentialsProvider.ImmediateRedisCredentialsProvider) credentialsProvider)
+                    .resolveCredentialsNow();
+            return authenticateResp3(channel, credentials, true, credentials);
         }
 
         CompletableFuture<RedisCredentials> credentialsFuture = credentialsProvider.resolveCredentials().toFuture();
 
-        return credentialsFuture.thenComposeAsync(credentials -> dispatchHello(channel, credentials));
+        return credentialsFuture.thenComposeAsync(credentials -> authenticateResp3(channel, credentials, true, credentials));
     }
 
     private AsyncCommand<String, String, Map<String, Object>> dispatchHello(Channel channel, RedisCredentials credentials) {
@@ -247,6 +253,96 @@ class RedisHandshake implements ConnectionInitializer {
         }
 
         return dispatch(channel, this.commandBuilder.hello(3, null, null, connectionState.getClientName()));
+    }
+
+    private CompletableFuture<Void> authenticateResp2(Channel channel, RedisCredentials credentials,
+            boolean allowFallbackToNoCredentials, RedisCredentials primaryCredentials) {
+
+        CompletableFuture<String> attempt = dispatchAuthOrPing(channel, credentials);
+        CompletableFuture<Void> result = new CompletableFuture<>();
+
+        attempt.whenComplete((ignored, throwable) -> {
+            if (throwable == null) {
+                result.complete(null);
+                return;
+            }
+
+            Throwable cause = unwrapCompletionException(throwable);
+
+            if (allowFallbackToNoCredentials && credentials.hasPassword() && isAuthenticationNotRequired(cause)) {
+                LOG.debug("Authentication not required, retrying without credentials");
+                authenticateResp2(channel, NO_CREDENTIALS, false, primaryCredentials == null ? credentials : primaryCredentials)
+                        .whenComplete((r, nested) -> propagateAuthenticationResult(result, nested));
+                return;
+            }
+
+            if (!allowFallbackToNoCredentials && credentials == NO_CREDENTIALS && hasUsableCredentials(primaryCredentials)
+                    && isAuthenticationRequired(cause)) {
+                LOG.debug("Authentication required, retrying with configured credentials");
+                authenticateResp2(channel, primaryCredentials, false, primaryCredentials)
+                        .whenComplete((r, nested) -> propagateAuthenticationResult(result, nested));
+                return;
+            }
+
+            result.completeExceptionally(cause);
+        });
+
+        return result;
+    }
+
+    private CompletableFuture<Map<String, Object>> authenticateResp3(Channel channel, RedisCredentials credentials,
+            boolean allowFallbackToNoCredentials, RedisCredentials primaryCredentials) {
+
+        CompletableFuture<Map<String, Object>> attempt = dispatchHello(channel, credentials).toCompletableFuture();
+        CompletableFuture<Map<String, Object>> result = new CompletableFuture<>();
+
+        attempt.whenComplete((response, throwable) -> {
+            if (throwable == null) {
+                result.complete(response);
+                return;
+            }
+
+            Throwable cause = unwrapCompletionException(throwable);
+
+            if (allowFallbackToNoCredentials && credentials.hasPassword() && isAuthenticationNotRequired(cause)) {
+                LOG.debug("Authentication not required, retrying HELLO without credentials");
+                authenticateResp3(channel, NO_CREDENTIALS, false, primaryCredentials == null ? credentials : primaryCredentials)
+                        .whenComplete((res, nested) -> propagateAuthenticationResult(result, res, nested));
+                return;
+            }
+
+            if (!allowFallbackToNoCredentials && credentials == NO_CREDENTIALS && hasUsableCredentials(primaryCredentials)
+                    && isAuthenticationRequired(cause)) {
+                LOG.debug("Authentication required, retrying HELLO with configured credentials");
+                authenticateResp3(channel, primaryCredentials, false, primaryCredentials)
+                        .whenComplete((res, nested) -> propagateAuthenticationResult(result, res, nested));
+                return;
+            }
+
+            result.completeExceptionally(cause);
+        });
+
+        return result;
+    }
+
+    private static void propagateAuthenticationResult(CompletableFuture<Void> target, Throwable throwable) {
+        if (throwable == null) {
+            target.complete(null);
+        } else {
+            target.completeExceptionally(throwable);
+        }
+    }
+
+    private static <T> void propagateAuthenticationResult(CompletableFuture<T> target, T value, Throwable throwable) {
+        if (throwable == null) {
+            target.complete(value);
+        } else {
+            target.completeExceptionally(throwable);
+        }
+    }
+
+    private static boolean hasUsableCredentials(RedisCredentials credentials) {
+        return credentials != null && credentials.hasPassword();
     }
 
     private CompletableFuture<Void> applyPostHandshake(Channel channel) {
@@ -326,6 +422,47 @@ class RedisHandshake implements ConnectionInitializer {
     private static boolean isUnknownCommand(Throwable error) {
         return error instanceof RedisException && LettuceStrings.isNotEmpty(error.getMessage())
                 && ((error.getMessage().startsWith("ERR") && error.getMessage().contains("unknown")));
+    }
+
+    private static Throwable unwrapCompletionException(Throwable throwable) {
+        while (throwable instanceof CompletionException || throwable instanceof ExecutionException) {
+            Throwable cause = throwable.getCause();
+            if (cause == null) {
+                break;
+            }
+            throwable = cause;
+        }
+        return throwable;
+    }
+
+    private static boolean isAuthenticationNotRequired(Throwable throwable) {
+        if (!(throwable instanceof RedisCommandExecutionException)) {
+            return false;
+        }
+
+        String message = throwable.getMessage();
+        if (message == null) {
+            return false;
+        }
+
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("no password is set") || normalized.contains("without any password configured")
+                || normalized.contains("acl user") && normalized.contains("does not exist")
+                || normalized.contains("user") && normalized.contains("does not exist");
+    }
+
+    private static boolean isAuthenticationRequired(Throwable throwable) {
+        if (!(throwable instanceof RedisCommandExecutionException)) {
+            return false;
+        }
+
+        String message = throwable.getMessage();
+        if (message == null) {
+            return false;
+        }
+
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("noauth") || normalized.contains("authentication required");
     }
 
     private static boolean isNoProto(Throwable error) {

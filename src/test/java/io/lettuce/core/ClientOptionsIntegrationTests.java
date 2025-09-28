@@ -187,6 +187,27 @@ class ClientOptionsIntegrationTests extends TestSupport {
         });
     }
 
+    @Test
+    void shouldFallbackToNoCredentialsWhenAuthNotRequired() {
+        RedisURI redisURI = RedisURI.builder().withHost(host).withPort(port).withAuthentication(username, passwd).build();
+
+        try (StatefulRedisConnection<String, String> connection = client.connect(redisURI)) {
+            assertThat(connection.sync().ping()).isEqualTo("PONG");
+        }
+    }
+
+    @Test
+    @EnabledOnCommand("ACL")
+    void shouldFallbackIfAclUserMissing() {
+        String nonexistentUser = "missing-" + System.nanoTime();
+        RedisURI redisURI = RedisURI.builder().withHost(host).withPort(port).withAuthentication(nonexistentUser, passwd)
+                .build();
+
+        try (StatefulRedisConnection<String, String> connection = client.connect(redisURI)) {
+            assertThat(connection.sync().ping()).isEqualTo("PONG");
+        }
+    }
+
     private void testHitRequestQueueLimit(RedisAsyncCommands<String, String> connection) {
 
         ConnectionWatchdog watchdog = getConnectionWatchdog(connection.getStatefulConnection());
