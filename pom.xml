@@ -82,6 +82,7 @@
         <!-- You need a running redis+sentinel for all tests, therefore disabled by default -->
         <skipITs>true</skipITs>
         <kotlin.compiler.incremental>true</kotlin.compiler.incremental>
+        <central.autoPublish>true</central.autoPublish>
 
     </properties>
 
@@ -967,18 +968,6 @@
                     <goals>deploy</goals>
                     <autoVersionSubmodules>true</autoVersionSubmodules>
                     <tagNameFormat>@{project.version}</tagNameFormat>
-                </configuration>
-            </plugin>
-
-            <plugin>
-                <groupId>org.sonatype.central</groupId>
-                <artifactId>central-publishing-maven-plugin</artifactId>
-                <version>0.8.0</version>
-                <extensions>true</extensions>
-                <configuration>
-                    <publishingServerId>central</publishingServerId>
-                    <autoPublish>true</autoPublish>
-                    <waitUntil>published</waitUntil>
                 </configuration>
             </plugin>
 
