@@ -281,7 +281,7 @@ class RedisHandshake implements ConnectionInitializer {
             Throwable cause = unwrapCompletionException(throwable);
 
             if (allowFallbackToNoCredentials && credentials.hasPassword() && isAuthenticationNotRequired(cause)) {
-                LOG.debug("Authentication not required, retrying without credentials");
+                LOG.warn("Authentication not required, retrying without credentials");
                 authenticateResp2(channel, NO_CREDENTIALS, false, primaryCredentials == null ? credentials : primaryCredentials)
                         .whenComplete((r, nested) -> propagateAuthenticationResult(result, nested));
                 return;
@@ -289,7 +289,7 @@ class RedisHandshake implements ConnectionInitializer {
 
             if (!allowFallbackToNoCredentials && credentials == NO_CREDENTIALS && hasUsableCredentials(primaryCredentials)
                     && isAuthenticationRequired(cause)) {
-                LOG.debug("Authentication required, retrying with configured credentials");
+                LOG.warn("Authentication required, retrying with configured credentials");
                 authenticateResp2(channel, primaryCredentials, false, primaryCredentials)
                         .whenComplete((r, nested) -> propagateAuthenticationResult(result, nested));
                 return;
@@ -316,7 +316,7 @@ class RedisHandshake implements ConnectionInitializer {
             Throwable cause = unwrapCompletionException(throwable);
 
             if (allowFallbackToNoCredentials && credentials.hasPassword() && isAuthenticationNotRequired(cause)) {
-                LOG.debug("Authentication not required, retrying HELLO without credentials");
+                LOG.warn("Authentication not required, retrying HELLO without credentials");
                 authenticateResp3(channel, NO_CREDENTIALS, false, primaryCredentials == null ? credentials : primaryCredentials)
                         .whenComplete((res, nested) -> propagateAuthenticationResult(result, res, nested));
                 return;
@@ -324,7 +324,7 @@ class RedisHandshake implements ConnectionInitializer {
 
             if (!allowFallbackToNoCredentials && credentials == NO_CREDENTIALS && hasUsableCredentials(primaryCredentials)
                     && isAuthenticationRequired(cause)) {
-                LOG.debug("Authentication required, retrying HELLO with configured credentials");
+                LOG.warn("Authentication required, retrying HELLO with configured credentials");
                 authenticateResp3(channel, primaryCredentials, false, primaryCredentials)
                         .whenComplete((res, nested) -> propagateAuthenticationResult(result, res, nested));
                 return;
